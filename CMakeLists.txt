@@ -10,3 +10,4 @@ add_compile_options(-Wall -Wextra -pedantic)
 
 add_executable(rpi_disp_dma rpi_disp_dma.c rpi_dma_utils.c)
 add_executable(rpi_adc_stream rpi_adc_stream.c rpi_dma_utils.c)
+add_executable(rpi_adc_stream_tcp rpi_adc_stream_tcp.c rpi_dma_utils.c)
