@@ -221,7 +221,7 @@ int main(int argc, char *argv[])
     }
     map_devices();
     map_uncached_mem(&vc_mem, VC_MEM_SIZE);
-    signal(SIGINT, terminate);
+    signal(SIGINT, terminate); // Terminate on Strg+C
     pwm_range = (PWM_FREQ * 2) / sample_rate;
     f = init_spi(SPI_FREQ);
     if (testmode)
