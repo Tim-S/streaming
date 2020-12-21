@@ -80,9 +80,6 @@
 #define SPI_CE0         0
 #define SPI_CE1         1
 
-// SPI register strings
-char *spi_regstrs[] = {"CS", "FIFO", "CLK", "DLEN", "LTOH", "DC", ""};
-
 // Microsecond timer
 #define USEC_BASE       (PHYS_REG_BASE + 0x3000)
 #define USEC_TIME       0x04
