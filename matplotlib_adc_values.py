@@ -5,7 +5,7 @@ import socket
 matplotlib.use("TkAgg")
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect(('192.168.2.201', 2000))
+s.connect(('pi0.local', 2000))
 
 fifo = s.makefile('r')
 

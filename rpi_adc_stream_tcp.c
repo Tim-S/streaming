@@ -29,7 +29,7 @@
 
 // Definitions for 2 bytes per ADC sample (11-bit)
 #define ADC_REQUEST(c)  {0xc0 | (c)<<5, 0x00}
-#define ADC_VOLTAGE(n)  (((n) * 5.269) / 2048.0)
+#define ADC_VOLTAGE(n)  (((n) * 3.131) / 2048.0)
 #define ADC_MILLIVOLTS(n) ((int)((((n) * 3300) + 1024) / 2048))
 #define ADC_RAW_VAL(d)  (((uint16_t)(d)<<8 | (uint16_t)(d)>>8) & 0x7ff)
 
