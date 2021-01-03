@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <assert.h>
+#include <ctype.h>
 
 #include "rpi_dma_utils.h"
 
@@ -108,8 +109,10 @@ int adc_stream_float_values(MEM_MAP *mp, uint32_t* timestamp_usec, float *values
 void do_streaming(MEM_MAP *mp, int nsamp, int sock);
 void create_server_socket(int* out_sock, char* listen_ip, char* port);
 
-int in_chans=1, sample_count=0, sample_rate=4096;
-uint32_t lockstep;
+int in_chans=1, sample_count=10, sample_rate=4096;
+
+char listen_ip[39] = "0.0.0.0";
+char port[5] = "4950";
 int listen_sock;
 
 uint32_t pwm_range, overrun_total;
@@ -123,18 +126,65 @@ int main(int argc, char *argv[])
 
     pwm_range = (PWM_FREQ * 2) / sample_rate;
 
-    lockstep = 0;
-    sample_count = 10;
+    int args=0;
+    while (argc > ++args)               // Process command-line args
+    {
+        if (argv[args][0] == '-')
+        {
+            switch (toupper(argv[args][1]))
+            {
+                case 'I':                   // -I: number of input channels
+                    if (args>=argc-1 || !isdigit((int)argv[args+1][0]))
+                        fprintf(stderr, "Error: no input chan count\n");
+                    else
+                        in_chans = atoi(argv[++args]);
+                    break;
+                case 'L':                   // -L: set listen-address
+                    if (args>=argc-1){
+                        fprintf(stderr, "Error: no listen-address provided\n");
+                    }else{
+                        char arg_listen_addr[21];
+                        char delimiter[] = ":";
+                        strncpy(arg_listen_addr, argv[++args], sizeof arg_listen_addr);
 
-    printf("Streaming %u samples per block at %u S/s %s\n",
-           sample_count, sample_rate, lockstep ? "(lockstep)" : "");
+                        strncpy(listen_ip, strtok(arg_listen_addr, delimiter), sizeof listen_ip);
+
+                        char* opt_port = strtok(NULL, delimiter);
+                        if(opt_port != NULL)
+                            strncpy(port, opt_port, sizeof port);
+                    }
+                    break;
+                case 'N':                   // -N: number of samples per block
+                    if (args>=argc-1 || !isdigit((int)argv[args+1][0]) ||
+                        (sample_count = atoi(argv[++args])) < 1)
+                        fprintf(stderr, "Error: no sample count\n");
+                    else if (sample_count > MAX_SAMPS)
+                    {
+                        fprintf(stderr, "Error: maximum sample count %u\n", MAX_SAMPS);
+                        sample_count = MAX_SAMPS;
+                    }
+                    break;
+                case 'R':                   // -R: sample rate (samples/sec)
+                    if (args>=argc-1 || !isdigit((int)argv[args+1][0]))
+                        fprintf(stderr, "Error: no sample rate\n");
+                    else if (sample_rate > MAX_SAMPLE_RATE)
+                        fprintf(stderr, "Error: exceeded max sample rate\n");
+                    else
+                        sample_rate = atoi(argv[++args]);
+                    break;
+                default:
+                    printf("Error: unrecognised option '%s'\n", argv[argc]);
+                    terminate(1);
+            }
+        }
+    }
+
+    printf("Streaming %u samples per block at %u S/s \n",
+           sample_count, sample_rate);
     adc_dma_init(&vc_mem, sample_count, 0);
     adc_stream_start();
 
     // Create TCP Server-Socket
-
-    char listen_ip[39] = "0.0.0.0";
-    char port[5] = "4950";
     create_server_socket(&listen_sock, listen_ip, port);
 
     while (1)
@@ -355,14 +405,14 @@ int adc_stream_float_values(MEM_MAP *mp, uint32_t* timestamp_usec, float *values
             dp->states[n] = 0;
             if (usec_start == 0)
                 usec_start = usec;
-            if (!lockstep)
-            {
+//            if (!lockstep)
+//            {
                 *timestamp_usec = usec - usec_start;
                 for (int i = 0; i < nsamples && i < maxlen; ++i) {
                     values[i] = ADC_VOLTAGE(ADC_RAW_VAL(rx_buff[i]));
                 }
                 buf_len = nsamples < maxlen ? nsamples : maxlen;
-            }
+//            }
         }
     }
 
