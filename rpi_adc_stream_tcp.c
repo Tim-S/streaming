@@ -113,6 +113,7 @@ void create_server_socket(int* out_sock, char* listen_ip, char* port);
 
 int in_chans=1, sample_count=0, sample_rate=4096;
 uint32_t lockstep;
+int listen_sock;
 
 uint32_t pwm_range, overrun_total;
 
@@ -134,13 +135,13 @@ int main(int argc, char *argv[])
     adc_stream_start();
 
     // Create TCP Server-Socket
-    int sock;
+
     char listen_ip[39] = "0.0.0.0";
     char port[5] = "4950";
-    create_server_socket(&sock, listen_ip, port);
+    create_server_socket(&listen_sock, listen_ip, port);
 
     while (1)
-        do_streaming(&vc_mem, sample_count, sock);
+        do_streaming(&vc_mem, sample_count, listen_sock);
 }
 
 // Map GPIO, DMA and SPI registers into virtual mem (user space)
@@ -177,10 +178,7 @@ void terminate(int sig)
     unmap_periph_mem(&spi_regs);
     unmap_periph_mem(&dma_regs);
     unmap_periph_mem(&gpio_regs);
-//    if (fifo_name)
-//        destroy_fifo(fifo_name, fifo_fd);
-//    if (samp_total)
-//        printf("Total samples %u, overruns %u\n", samp_total, overrun_total);
+    close(listen_sock);
     if(overrun_total)
         printf("Overruns: %u\n", overrun_total);
     exit(0);
