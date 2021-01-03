@@ -108,8 +108,8 @@ void adc_stream_wait(void);
 void adc_stream_stop(void);
 int adc_stream_csv(MEM_MAP *mp, char *value_string, int maxlen, int nsamples);
 int adc_stream_float_values(MEM_MAP *mp, uint32_t* timestamp_usec, float *values, int maxlen, int nsamples);
-void do_streaming(MEM_MAP *mp, int nsamp, int sock, struct sockaddr_storage* their_addr, socklen_t* their_addr_size);
-void create_server_socket(int* out_sock, struct sockaddr_storage* out_their_addr, socklen_t* out_their_addr_size);
+void do_streaming(MEM_MAP *mp, int nsamp, int sock);
+void create_server_socket(int* out_sock, char* listen_ip, char* port);
 
 int in_chans=1, sample_count=0, sample_rate=4096;
 uint32_t lockstep;
@@ -135,19 +135,12 @@ int main(int argc, char *argv[])
 
     // Create TCP Server-Socket
     int sock;
-    struct sockaddr_storage their_addr;
-    socklen_t their_addr_size;
-    create_server_socket(&sock, &their_addr, &their_addr_size);
+    char listen_ip[39] = "0.0.0.0";
+    char port[5] = "4950";
+    create_server_socket(&sock, listen_ip, port);
 
-    fd_set read_flags,write_flags; // the flag sets to be used
-    struct timeval waitd = {10, 0};// the max wait time for an event
-    int sel;                      // holds return value for select();
-
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "EndlessLoop"
     while (1)
-        do_streaming(&vc_mem, sample_count, sock, &their_addr, &their_addr_size);
-#pragma clang diagnostic pop
+        do_streaming(&vc_mem, sample_count, sock);
 }
 
 // Map GPIO, DMA and SPI registers into virtual mem (user space)
@@ -227,29 +220,26 @@ typedef struct {
 void adc_dma_init(MEM_MAP *mp, int n_samples, int single)
 {
     ADC_DMA_DATA *dp=mp->virt;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wmissing-field-initializers"
     ADC_DMA_DATA dma_data = {
             .samp_size = 2, .pwm_val = pwm_range, .txd={0xd0, in_chans>1 ? 0xf0 : 0xd0},
             .adc_csd = SPI_TFR_ACT | SPI_AUTO_CS | SPI_DMA_EN | SPI_FIFO_CLR | ADC_CE_NUM,
             .usecs = {0, 0}, .states = {0, 0}, .rxd1 = {0}, .rxd2 = {0},
             .cbs = {
                     // Rx input: read data from usec clock and SPI, into 2 ping-pong buffers
-                    {SPI_RX_TI, REG(usec_regs, USEC_TIME), MEM(mp, &dp->usecs[0]),  4,             0, CBS(1), 0}, // 0
-                    {SPI_RX_TI, REG(spi_regs, SPI_FIFO),   MEM(mp, dp->rxd1),       n_samples * 4, 0, CBS(2), 0}, // 1
-                    {SPI_RX_TI, REG(spi_regs, SPI_CS),     MEM(mp, &dp->states[0]), 4,             0, CBS(3), 0}, // 2
-                    {SPI_RX_TI, REG(usec_regs, USEC_TIME), MEM(mp, &dp->usecs[1]),  4,             0, CBS(4), 0}, // 3
-                    {SPI_RX_TI, REG(spi_regs, SPI_FIFO),   MEM(mp, dp->rxd2),       n_samples * 4, 0, CBS(5), 0}, // 4
-                    {SPI_RX_TI, REG(spi_regs, SPI_CS),     MEM(mp, &dp->states[1]), 4,             0, CBS(0), 0}, // 5
+                    {SPI_RX_TI, REG(usec_regs, USEC_TIME), MEM(mp, &dp->usecs[0]),  4,             0, CBS(1), 0, 0}, // 0
+                    {SPI_RX_TI, REG(spi_regs, SPI_FIFO),   MEM(mp, dp->rxd1),       n_samples * 4, 0, CBS(2), 0, 0}, // 1
+                    {SPI_RX_TI, REG(spi_regs, SPI_CS),     MEM(mp, &dp->states[0]), 4,             0, CBS(3), 0, 0}, // 2
+                    {SPI_RX_TI, REG(usec_regs, USEC_TIME), MEM(mp, &dp->usecs[1]),  4,             0, CBS(4), 0, 0}, // 3
+                    {SPI_RX_TI, REG(spi_regs, SPI_FIFO),   MEM(mp, dp->rxd2),       n_samples * 4, 0, CBS(5), 0, 0}, // 4
+                    {SPI_RX_TI, REG(spi_regs, SPI_CS),     MEM(mp, &dp->states[1]), 4,             0, CBS(0), 0, 0}, // 5
                     // Tx output: 2 data writes to SPI for chan 0 & 1, or both chan 0
-                    {SPI_TX_TI, MEM(mp, dp->txd),          REG(spi_regs, SPI_FIFO), 8,             0, CBS(6), 0}, // 6
+                    {SPI_TX_TI, MEM(mp, dp->txd),          REG(spi_regs, SPI_FIFO), 8,             0, CBS(6), 0, 0}, // 6
                     // PWM ADC trigger: wait for PWM, set sample length, trigger SPI
-                    {PWM_TI,    MEM(mp, &dp->pwm_val),     REG(pwm_regs, PWM_FIF1), 4,             0, CBS(8), 0}, // 7
-                    {PWM_TI,    MEM(mp, &dp->samp_size),   REG(spi_regs, SPI_DLEN), 4,             0, CBS(9), 0}, // 8
-                    {PWM_TI,    MEM(mp, &dp->adc_csd),     REG(spi_regs, SPI_CS),   4,             0, CBS(7), 0}, // 9
+                    {PWM_TI,    MEM(mp, &dp->pwm_val),     REG(pwm_regs, PWM_FIF1), 4,             0, CBS(8), 0, 0}, // 7
+                    {PWM_TI,    MEM(mp, &dp->samp_size),   REG(spi_regs, SPI_DLEN), 4,             0, CBS(9), 0, 0}, // 8
+                    {PWM_TI,    MEM(mp, &dp->adc_csd),     REG(spi_regs, SPI_CS),   4,             0, CBS(7), 0, 0}, // 9
             }
     };
-#pragma clang diagnostic pop
     if (single)                                 // If single-shot, stop after first Rx block
         dma_data.cbs[2].next_cb = 0;
     memcpy(dp, &dma_data, sizeof(dma_data));    // Copy DMA data into uncached memory
@@ -276,14 +266,17 @@ void set_nonblock(int socket) {
 }
 
 // Manage streaming output
-void do_streaming(MEM_MAP *mp, int nsamp, int sock, struct sockaddr_storage* their_addr, socklen_t* their_addr_size)
+void do_streaming(MEM_MAP *mp, int nsamp, int sock)
 {
     printf("Waiting for Client...\n");
 
+    struct sockaddr_storage their_addr;
+    socklen_t their_addr_size;
+
     //accept
-    int new_sd = accept(sock, (struct sockaddr *) their_addr, their_addr_size);
+    int new_sd = accept(sock, (struct sockaddr *)&their_addr, &their_addr_size);
     if( new_sd < 0) {
-        printf("Accept error %m\n", errno);
+        printf("Accept error %s\n", strerror(errno));
         terminate(1);
     }
 
@@ -388,18 +381,12 @@ void adc_stream_stop(void)
 }
 
 
-void create_server_socket(int* out_sock, struct sockaddr_storage* out_their_addr, socklen_t* out_their_addr_size){
-    char listen_ip[39] = "0.0.0.0";
-    char port[5] = "4950";
-
-    int status, sock, new_sd;
+void create_server_socket(int* out_sock, char* listen_ip, char* port)
+{
+    int status, sock;
 
     struct addrinfo hints;
     struct addrinfo *server_info;  //will point to the results
-
-    //store the connecting address and size
-    struct sockaddr_storage their_addr;
-    socklen_t their_addr_size;
 
     //socket infoS
     memset(&hints, 0, sizeof hints); //make sure the struct is empty
@@ -416,7 +403,7 @@ void create_server_socket(int* out_sock, struct sockaddr_storage* out_their_addr
     //make socket
     sock = socket(server_info->ai_family, server_info->ai_socktype, server_info->ai_protocol);
     if (sock < 0) {
-        printf("\nserver socket failure %m", errno);
+        printf("\nserver socket failure %s", strerror(errno));
         terminate(1);
     }
 
@@ -430,16 +417,15 @@ void create_server_socket(int* out_sock, struct sockaddr_storage* out_their_addr
     //unlink and bind
     unlink(listen_ip);
     if(bind (sock, server_info->ai_addr, server_info->ai_addrlen) < 0) {
-        printf("\nBind error %m", errno);
+        printf("\nBind error %s", strerror(errno));
         terminate(1);
     }
 
     //listen
     if(listen(sock, 5) < 0) {
-        printf("\nListen error %m", errno);
+        printf("\nListen error %s", strerror(errno));
         terminate(1);
     }
-    their_addr_size = sizeof(their_addr);
 
     char hostname[39] = "";
     char service[5] = "";
