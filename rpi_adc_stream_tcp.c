@@ -31,7 +31,6 @@
 // Definitions for 2 bytes per ADC sample (11-bit)
 #define ADC_REQUEST(c)  {0xc0 | (c)<<5, 0x00}
 #define ADC_VOLTAGE(n)  (((n) * 3.131) / 2048.0)
-#define ADC_MILLIVOLTS(n) ((int)((((n) * 3300) + 1024) / 2048))
 #define ADC_RAW_VAL(d)  (((uint16_t)(d)<<8 | (uint16_t)(d)>>8) & 0x7ff)
 
 // Non-cached memory size
@@ -86,9 +85,7 @@
 #define USEC_TIME       0x04
 uint32_t usec_start;
 
-// Buffer for streaming output, and raw Rx data
-#define STREAM_BUFFLEN  10000
-char stream_buff[STREAM_BUFFLEN];
+// Buffer for raw Rx data
 uint32_t rx_buff[MAX_SAMPS];
 
 // Virtual memory pointers to acceess peripherals & memory
@@ -159,7 +156,7 @@ void map_devices(void)
 // Catastrophic failure in initial setup
 void fail(char *s)
 {
-    printf(s);
+    perror(s);
     terminate(0);
 }
 
