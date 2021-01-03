@@ -4,6 +4,12 @@
 #include <stdio.h>
 #include <signal.h>
 #include <string.h>
+
+#include <netdb.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <assert.h>
+
 #include "rpi_dma_utils.h"
 
 #define VERSION "0.1"
@@ -102,7 +108,8 @@ void adc_stream_wait(void);
 void adc_stream_stop(void);
 int adc_stream_csv(MEM_MAP *mp, char *value_string, int maxlen, int nsamples);
 int adc_stream_float_values(MEM_MAP *mp, uint32_t* timestamp_usec, float *values, int maxlen, int nsamples);
-void do_streaming(MEM_MAP *mp, char *vals, int maxlen, int nsamp);
+void do_streaming(MEM_MAP *mp, int nsamp, int sock, struct sockaddr_storage* their_addr, socklen_t* their_addr_size);
+void create_server_socket(int* out_sock, struct sockaddr_storage* out_their_addr, socklen_t* out_their_addr_size);
 
 int in_chans=1, sample_count=0, sample_rate=4096;
 uint32_t lockstep;
@@ -125,10 +132,21 @@ int main(int argc, char *argv[])
            sample_count, sample_rate, lockstep ? "(lockstep)" : "");
     adc_dma_init(&vc_mem, sample_count, 0);
     adc_stream_start();
+
+    // Create TCP Server-Socket
+    int sock;
+    struct sockaddr_storage their_addr;
+    socklen_t their_addr_size;
+    create_server_socket(&sock, &their_addr, &their_addr_size);
+
+    fd_set read_flags,write_flags; // the flag sets to be used
+    struct timeval waitd = {10, 0};// the max wait time for an event
+    int sel;                      // holds return value for select();
+
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "EndlessLoop"
     while (1)
-        do_streaming(&vc_mem, stream_buff, STREAM_BUFFLEN, sample_count);
+        do_streaming(&vc_mem, sample_count, sock, &their_addr, &their_addr_size);
 #pragma clang diagnostic pop
 }
 
@@ -250,31 +268,83 @@ void adc_stream_start(void)
     start_pwm();
 }
 
+void set_nonblock(int socket) {
+    int flags;
+    flags = fcntl(socket,F_GETFL,0);
+    assert(flags != -1);
+    fcntl(socket, F_SETFL, flags | O_NONBLOCK);
+}
 
 // Manage streaming output
-void do_streaming(MEM_MAP *mp, char *vals, int maxlen, int nsamp)
+void do_streaming(MEM_MAP *mp, int nsamp, int sock, struct sockaddr_storage* their_addr, socklen_t* their_addr_size)
 {
+    printf("Waiting for Client...\n");
+
+    //accept
+    int new_sd = accept(sock, (struct sockaddr *) their_addr, their_addr_size);
+    if( new_sd < 0) {
+        printf("Accept error %m\n", errno);
+        terminate(1);
+    }
+
+    set_nonblock(new_sd);
+    printf("Successful Connection!\n");
+
+    int numBytesSent;
+
+    fd_set read_flags,write_flags; // the flag sets to be used
+    struct timeval waitd = {10, 0};// the max wait time for an event
+    int sel;                      // holds return value for select();
+
     int n;
 
     uint32_t time_usec;
     float samples[nsamp];
 
-    char value_string [((4+1+3+1)*nsamp)+20];
+    char value_string [((4+1+3+1)*nsamp)+20]; // at least (length of timestamp in usec + ',') +  ( 4 digits before the dot + length of decimal point'.' + 3 digits after the '.' + one ',' PER SAMPLE) + '\n'
     uint32_t string_len=0;
 
+    while(1) {
+        FD_ZERO(&read_flags);
+        FD_ZERO(&write_flags);
+        FD_SET(new_sd, &read_flags);
+        FD_SET(new_sd, &write_flags);
 
-    if ((n=adc_stream_float_values(mp, &time_usec, samples, (uint)(sizeof samples), nsamp)) > 0){
-        string_len += sprintf(&value_string[string_len], "%d", time_usec);
-        for (int i=0; i < n; i++){
-            // print n samples (ADC-Values) comma-separated in one line
-            string_len += sprintf(&value_string[string_len], "%s%4.3f", string_len ? "," : "",
-                                  ADC_VOLTAGE(ADC_RAW_VAL(rx_buff[i])));
+        sel = select(new_sd+1, &read_flags, &write_flags, (fd_set*)0, &waitd);
+
+        //if an error with select
+        if(sel < 0)
+            continue;
+
+        //socket ready for writing
+        if(FD_ISSET(new_sd, &write_flags)) {
+            FD_CLR(new_sd, &write_flags);
+
+            if ((n=adc_stream_float_values(mp, &time_usec, samples, (uint)(sizeof samples), nsamp)) > 0){
+                string_len += sprintf(&value_string[string_len], "%d", time_usec);
+                for (int i=0; i < n; i++){
+                    // print n samples (ADC-Values) comma-separated in one line
+                    string_len += sprintf(&value_string[string_len], "%s%4.3f", string_len ? "," : "", samples[i]);
+                }
+                string_len += sprintf(&value_string[string_len], "\n");
+
+                numBytesSent = send(new_sd, value_string, string_len, 0);
+                if(numBytesSent < 0){
+                    printf("\nClosing socket\n");
+                    close(new_sd);
+                    break;
+                }
+
+                string_len = 0;
+
+                if(numBytesSent == 0){
+                    usleep(10);
+                }
+            }
+            else
+                usleep(10);
         }
-        string_len += sprintf(&value_string[string_len], "\n");
-        printf("%s", value_string);
     }
-    else
-        usleep(10);
 }
 
 int adc_stream_float_values(MEM_MAP *mp, uint32_t* timestamp_usec, float *values, int maxlen, int nsamples) {
@@ -315,4 +385,71 @@ int adc_stream_float_values(MEM_MAP *mp, uint32_t* timestamp_usec, float *values
 void adc_stream_stop(void)
 {
     stop_pwm();
+}
+
+
+void create_server_socket(int* out_sock, struct sockaddr_storage* out_their_addr, socklen_t* out_their_addr_size){
+    char listen_ip[39] = "0.0.0.0";
+    char port[5] = "4950";
+
+    int status, sock, new_sd;
+
+    struct addrinfo hints;
+    struct addrinfo *server_info;  //will point to the results
+
+    //store the connecting address and size
+    struct sockaddr_storage their_addr;
+    socklen_t their_addr_size;
+
+    //socket infoS
+    memset(&hints, 0, sizeof hints); //make sure the struct is empty
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM; // tcp
+    hints.ai_flags = AI_PASSIVE;     // Socket address is intended for `bind'
+
+    //get server info, put into server_info
+    if ((status = getaddrinfo(listen_ip, port, &hints, &server_info)) != 0) {
+        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+        terminate(1);
+    }
+
+    //make socket
+    sock = socket(server_info->ai_family, server_info->ai_socktype, server_info->ai_protocol);
+    if (sock < 0) {
+        printf("\nserver socket failure %m", errno);
+        terminate(1);
+    }
+
+    //allow reuse of port
+    int reuse_socket_addr=1;
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_socket_addr, sizeof(int)) == -1) {
+        perror("setsockopt");
+        terminate(1);
+    }
+
+    //unlink and bind
+    unlink(listen_ip);
+    if(bind (sock, server_info->ai_addr, server_info->ai_addrlen) < 0) {
+        printf("\nBind error %m", errno);
+        terminate(1);
+    }
+
+    //listen
+    if(listen(sock, 5) < 0) {
+        printf("\nListen error %m", errno);
+        terminate(1);
+    }
+    their_addr_size = sizeof(their_addr);
+
+    char hostname[39] = "";
+    char service[5] = "";
+    if((status = getnameinfo(server_info->ai_addr, server_info->ai_addrlen, hostname, sizeof hostname, service, sizeof service, NI_NUMERICHOST | NI_NUMERICSERV)) != 0){
+        fprintf(stderr, "getnameinfo error: %s\n", gai_strerror(status));
+    }else{
+        printf("Listening on IP: %s Port: %s \n", hostname, service);
+    }
+
+    freeaddrinfo(server_info);
+
+    *out_sock = sock;
 }
