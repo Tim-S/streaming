@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <assert.h>
 #include <ctype.h>
+#include <langinfo.h>
 
 #include "rpi_dma_utils.h"
 
@@ -327,6 +328,13 @@ void do_streaming(MEM_MAP *mp, int nsamp, int sock)
     }
 
     set_nonblock(new_sd);
+
+    struct timeval timeout = {.tv_sec = 5, .tv_usec = 0};
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,(char *)&timeout, sizeof(timeout)) < 0 ) {
+        perror("setsockopt");
+        terminate(1);
+    }
+
     printf("Successful Connection!\n");
 
     int numBytesSent;
@@ -367,7 +375,7 @@ void do_streaming(MEM_MAP *mp, int nsamp, int sock)
                 }
                 string_len += sprintf(&value_string[string_len], "\n");
 
-                numBytesSent = send(new_sd, value_string, string_len, 0);
+                numBytesSent = send(new_sd, value_string, string_len, MSG_NOSIGNAL );
                 if(numBytesSent < 0){
                     printf("\nClosing socket\n");
                     close(new_sd);
