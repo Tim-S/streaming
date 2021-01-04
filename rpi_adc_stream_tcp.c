@@ -317,12 +317,12 @@ void do_streaming(MEM_MAP *mp, int nsamp, int sock)
     printf("Waiting for Client...\n");
 
     struct sockaddr_storage their_addr;
-    socklen_t their_addr_size;
+    socklen_t their_addr_size  = sizeof( (struct sockaddr *) &their_addr);
 
     //accept
     int new_sd = accept(sock, (struct sockaddr *)&their_addr, &their_addr_size);
     if( new_sd < 0) {
-        printf("Accept error %s\n", strerror(errno));
+        printf("Accept error %s (%d)\n", strerror(errno), errno);
         terminate(1);
     }
 
