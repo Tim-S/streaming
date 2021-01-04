@@ -109,7 +109,7 @@ int adc_stream_float_values(MEM_MAP *mp, uint32_t* timestamp_usec, float *values
 void do_streaming(MEM_MAP *mp, int nsamp, int sock);
 void create_server_socket(int* out_sock, char* listen_ip, char* port);
 
-int in_chans=1, sample_count=10, sample_rate=4096;
+int in_chans=1, sample_count=256, sample_rate=1024;
 
 char listen_ip[39] = "0.0.0.0";
 char port[5] = "4950";
@@ -179,6 +179,7 @@ int main(int argc, char *argv[])
         }
     }
 
+    uint32_t spi_freq = init_spi(SPI_FREQ);
     printf("Streaming %u samples per block at %u S/s \n",
            sample_count, sample_rate);
     adc_dma_init(&vc_mem, sample_count, 0);

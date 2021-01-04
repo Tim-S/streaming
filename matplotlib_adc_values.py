@@ -5,7 +5,7 @@ import socket
 matplotlib.use("TkAgg")
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect(('pi0.local', 2000))
+s.connect(('pi0.local', 4950))
 
 fifo = s.makefile('r')
 
@@ -27,7 +27,7 @@ def init():
 
 
 def animate(i):
-    y = np.fromstring(fifo.readline(), sep=',')
+    y = np.fromstring(fifo.readline(), sep=',')[1:]
     x = np.linspace(0, 1, len(y))
     # y = np.fromstring(fifo.readline(), sep=',')
     # line.set_data(x, y)
