@@ -110,7 +110,7 @@ int adc_stream_float_values(MEM_MAP *mp, uint32_t* timestamp_usec, float *values
 void do_streaming(MEM_MAP *mp, int nsamp, int sock);
 void create_server_socket(int* out_sock, char* listen_ip, char* port);
 
-int in_chans=1, sample_count=256, sample_rate=1024;
+int in_chans=1, sample_count=MAX_SAMPS, sample_rate=5*MAX_SAMPS;
 
 char listen_ip[39] = "0.0.0.0";
 char port[5] = "4950";
